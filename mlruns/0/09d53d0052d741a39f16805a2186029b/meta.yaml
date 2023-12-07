@@ -1,0 +1,16 @@
+artifact_uri: mlflow-artifacts:/0/09d53d0052d741a39f16805a2186029b/artifacts
+deleted_time: 1701876550889
+end_time: 1701876545519
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: deleted
+run_id: 09d53d0052d741a39f16805a2186029b
+run_name: abundant-rook-562
+run_uuid: 09d53d0052d741a39f16805a2186029b
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1701874219527
+status: 4
+tags: []
+user_id: ipkov

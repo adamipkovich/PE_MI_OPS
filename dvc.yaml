@@ -1,0 +1,26 @@
+stages:
+  preprocess:
+    cmd: python preprocess.py
+    deps:
+    - data/detect_dataset.xlsx
+    - preprocess.py
+    outs:
+    - split_data/test.xlsx
+    - split_data/train.xlsx
+  train:
+    cmd: python train.py
+    deps:
+    - preprocess.py
+    - split_data/train.xlsx
+    - train.py
+  test:
+    cmd: python test.py
+    deps:
+    - train.py
+    - split_data/test.xlsx
+    - test.py
+  register:
+    cmd: python register.py
+    deps:
+    - test.py
+    - register.py

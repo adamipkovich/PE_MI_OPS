@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/0/d2b9aed3d9c242b6b478ab47cfda0503/artifacts
+end_time: 1701879444300
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: d2b9aed3d9c242b6b478ab47cfda0503
+run_name: silent-midge-51
+run_uuid: d2b9aed3d9c242b6b478ab47cfda0503
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1701877499721
+status: 3
+tags: []
+user_id: ipkov
