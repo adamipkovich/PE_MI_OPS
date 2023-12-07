@@ -1,9 +1,0 @@
-digest: 700e8ebc
-name: dataset
-profile: '{"num_rows": 9600, "num_elements": 57600}'
-schema: '{"mlflow_colspec": [{"type": "double", "name": "Ia"}, {"type": "double",
-  "name": "Ib"}, {"type": "double", "name": "Ic"}, {"type": "double", "name": "Va"},
-  {"type": "double", "name": "Vb"}, {"type": "double", "name": "Vc"}]}'
-source: '{"tags": {"mlflow.user": "ipkov", "mlflow.source.name": "H:\\Projects\\MI_OPS\\PE_MI_OPS\\train.py",
-  "mlflow.source.type": "LOCAL", "mlflow.source.git.commit": "b3a058f056f69fb6f6cf44faa17eec19c574e42d"}}'
-source_type: code

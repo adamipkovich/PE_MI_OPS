@@ -10,7 +10,7 @@ if __name__ == "__main__":
 
     ##get previous model
     client = mlflow.tracking.MlflowClient()
-    model_name = "decision_tree_detect"
+    model_name = "decision_tree_pipeline"
     try:
         model_metadata = client.get_latest_versions(model_name, stages=["None"])
     except mlflow.exceptions.RestException:
@@ -20,10 +20,6 @@ if __name__ == "__main__":
     if any(model_metadata):
 
         ### bármilyen választás logika elfogadható ... jobb metrikák stb
-
-        # client.delete_model_version(
-        #     name=model_name, version=1
-        # )
 
         result = client.create_model_version(
             name=model_name,

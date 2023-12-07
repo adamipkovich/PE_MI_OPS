@@ -4,11 +4,9 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_s
 
 if __name__ == "__main__":
     mlflow.set_tracking_uri("http://localhost:5000")
-    ## keressünk jó runokat
 
     ## get the latest run
-
-    runs = mlflow.search_runs()#filter_string="metrics.tn > 0.91 and metrics.tp > 0.91"
+    runs = mlflow.search_runs()
     run_id = runs["run_id"].iloc[0]
 
     ## predikáljunk
