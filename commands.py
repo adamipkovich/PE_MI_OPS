@@ -1,23 +1,22 @@
 import requests
 import pandas as pd
-import csv
-import json
+import pika
+
+def post_data(data, queue_name, host = "localhost", port = 5672, user = "guest", password = "guest"):
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=host, port=port, credentials=pika.PlainCredentials(user, password)))
+    channel = connection.channel()
+    channel.queue_declare(queue=queue_name, durable=True)
+    channel.basic_publish(exchange='', routing_key=queue_name, body=data.encode('utf-8'))
+    connection.close()
+
 if __name__ == "__main__":
     url = "http://localhost:8000"
-    run_id = "4351d55a1fbc445e968b8c573cf5f1be"
-    resp = requests.get(url + "/model")
-    print(resp)
-    resp = requests.post(url + "/model/" + run_id)    
+    run_id = "781fd38f7a0b4ef0a7e562b11eacf8e2"
+    resp = requests.get(url + "/model/" + run_id)    
     print(resp)
 
+    data = pd.read_csv("./data/cars.csv", sep=";")
+    post_data(data.to_json(), "cars")
+    resp = requests.get(url + "/predict/cars" )
     
-
-    with open("./data/cars.csv", newline='') as csvfile:
-        reader = csv.reader(csvfile, delimiter=';')
-        data = [row for row in reader]
-
-    data = json.dumps(data)
-    
-    #data = pd.read_csv(, sep=";")
-    resp = requests.post(url + "/predict", data=data.to_json())
     print(resp.content)

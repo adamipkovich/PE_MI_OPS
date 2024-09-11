@@ -152,7 +152,7 @@ Amint létrehoztuk *load_model.py* fájlt,
 
 
 
-## FastAPI és uvicorn
+## FastAPI és RabbitMQ 
 A FastAPI egy RestAPI-t követő csomag API-ok létrehozásához. A uvicorn egy backendet futtató, Flasken alapuló csomag, amivek könnyen tudjuk futtatni a FastAPI által létrehozott API-t.
 
 Egy gyors hello world alkalmazás egy API felállításához. 
@@ -187,7 +187,7 @@ http://localhost:8000/docs
 
 Ezt nézze meg mindenki magának!
 
-A rendszert bővíthetjük úgy hogy ha ránavigálunk egy linkre, akkor betöltse az adott mlflow modelt. Először  írjuk meg az API parancsot:
+A rendszert bővíthetjük úgy hogy ha postolunk egy parancsot, akkor akkor betöltse az adott mlflow modelt. 
 
 ```python
 model = None
@@ -216,19 +216,184 @@ app = FastAPI(lifespan=lifespan)
 # here comes API commands and if __main__ ...
 
 ```
-
-Hogy használni tudjuk a modellünket, szükségünk van a model "predict" függvényének megírásához. Ez azt jelenti, hogy post API-t írunk, egy request-tel - Ez egy olyan objektum, amivel el tudjuk küldeni az API-nknak az adatot.
+Jésöbb hozzáadhatjuk, hogy a lementett input neveket is betöltsük. A Teljes kód így néz ki:
 
 ```python
+## FastAPI
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
+import mlflow
+import mlflow.sklearn
 import pandas as pd
 
+model = None
+client = None
+signature = None
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global client
+    client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
+    yield
+    return
 
-...
+app = FastAPI(lifespan=lifespan)
+
+@app.get("/") 
+async def read_root():
+    """Default path. See /docs for more."""
+    return "Hello World"
+
+@app.get("/model/{run_id}")
+def get_mlflow_model(run_id : str):
+    """Loads a model from the tracking server, by run_id"""
+    global model, client, signature
+    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model")
+    run_data_dict = client.get_run(run_id).data.to_dictionary()
+    print(run_data_dict)
+    signature = eval(run_data_dict["params"]["input"])
 
 
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("back_end:app", host="localhost", port=8000, reload=True)
 
 ```
 
+
+Hogy használni tudjuk a modellünket, szükségünk van adatokra, és adatok átadására. A FastAPI képes post requestekkel adatot fogadni, ugyanakkor ez nagy adathalmaznál már nem hatékony. Ezért egy brókerrendszert alkalmazunk, hogy skálázható legyen a programunk. Ez lesz a RabbitMQ. A Rabbit feladókkel (producer), fogyasztókkal (consumer) és sorokkal (queue) dolgozik alapszinten. A feladó küld egy üzenetet, (ami a mi esetünkben tartalmazza majd az adatokat) a sorba, ami eljuttatja a fogyasztónak a messaget, ahol várakozik (megfelelő beállítással), amíg vissza nem jelez a fogyasztó, hogy megkapta. Ahhot hogy csatlakozzunk a rabbitMQ szolgáltatáshoz, először telepítjük a megfelelő csomagot:
+
+```
+pip install pika
+```
+
+Majd indulásnál a következő kódsort használjuk:
+
+
+```python
+import pika
+rabbit_connection = None
+channel = None
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global client, rabbit_connection, channel
+    client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
+    credentials = pika.PlainCredentials(username="guest", password="guest")
+    while rabbit_connection is None:
+        try:
+            rabbit_connection = pika.BlockingConnection(pika.ConnectionParameters(host = "localhost", port = 5672, credentials=credentials, heartbeat=0))
+        except pika.exceptions.AMQPConnectionError:
+            logging.error(f"Connection to RabbitMQ failed at localhost:5672. Retrying...")
+            time.sleep(0.3)
+    channel = rabbit_connection.channel()
+    channel.basic_qos(prefetch_count=1)
+    yield
+    channel.close()
+    rabbit_connection.close()
+    return
+```
+Ez a kód indulásnál már csatlakozik a Rabbit szolgáltatáshoz, így nekünk már nem kell törődni vele.
+
+A feladó kódját külön definiáljuk, ez egy kliensoldali alkalmazás lesz:
+```python
+def post_data(data, queue_name, host = "localhost", port = 5672, user = "guest", password = "guest"):
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=host, port=port, credentials=pika.PlainCredentials(user, password)))
+    channel = connection.channel()
+    channel.queue_declare(queue=queue_name, durable=True)
+    channel.basic_publish(exchange='', routing_key=queue_name, body=data.encode('utf-8'))
+    connection.close()
+
+```
+
+Connection, channel, publish, queue declare, etc magyarázása...
+
+Ezután készítünk egy get command URL-t a predikcióhoz:
+```python
+
+@app.get("/predict/{queue}")
+async def predict(queue):
+    global channel
+    method_frame, header_frame, body = channel.basic_get(queue)
+    data = body.decode("utf-8")
+    channel.basic_ack(method_frame.delivery_tag)
+    data = pd.read_json(data)
+    return pd.DataFrame(model.predict(data.loc[:, signature])).to_json() 
+
+```
+
+Végül a kód így néz ki:
+
+```python
+## FastAPI
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
+import mlflow
+import mlflow.sklearn
+import pandas as pd
+import pika
+import time
+import logging
+
+model = None
+client = None
+signature = None
+rabbit_connection = None
+channel = None
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global client, rabbit_connection, channel
+    client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
+    credentials = pika.PlainCredentials(username="guest", password="guest")
+    while rabbit_connection is None:
+        try:
+            rabbit_connection = pika.BlockingConnection(pika.ConnectionParameters(host = "localhost", port = 5672, credentials=credentials, heartbeat=0))
+        except pika.exceptions.AMQPConnectionError:
+            logging.error(f"Connection to RabbitMQ failed at localhost:5672. Retrying...")
+            time.sleep(0.3)
+    channel = rabbit_connection.channel()
+    channel.basic_qos(prefetch_count=1)
+                
+    yield
+    channel.close()
+    rabbit_connection.close()
+    return
+
+app = FastAPI(lifespan=lifespan)
+
+@app.get("/") 
+async def read_root():
+    """Default path. See /docs for more."""
+    return "Hello World"
+    ## TODO:
+
+@app.get("/model/{run_id}")
+def get_mlflow_model(run_id : str):
+    global model, client, signature
+    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model")
+    run_data_dict = client.get_run(run_id).data.to_dictionary()
+    print(run_data_dict)
+    signature = eval(run_data_dict["params"]["input"])
+
+@app.get("/predict/{queue}")
+async def predict(queue):
+    global channel
+    method_frame, header_frame, body = channel.basic_get(queue)
+    data = body.decode("utf-8")
+    channel.basic_ack(method_frame.delivery_tag)
+    data = pd.read_json(data)
+
+    y = model.predict(data.loc[:, signature])
+    data["y_pred"] = y
+    return data.to_json()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("back_end:app", host="localhost", port=8000, reload=True)
+```
+
+
+## Frontend: streamlit
 
 ### Virtuális környezet exportálása
 ```
