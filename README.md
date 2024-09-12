@@ -32,7 +32,7 @@ Data wrangler az adatok vizsgálatához:
 
 Kattintsunk az ábrán jelölt + ikonra.
 
-![alt text](assets\readme\virtu_env.png)
+![alt text](assets/readme/virtu_env.png)
 
 Felül megjelenik egy panel, ahol kiválaszthatjuk a Python-t, illetve hogy használunk-e requirements.txt-t. Itt ki vannak mentve a szükséges csomagok.
 Ha az utóbbit nem sikerül kiválasztani, akkor a következővel tudjuk telepíteni:
