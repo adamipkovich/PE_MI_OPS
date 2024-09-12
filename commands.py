@@ -19,4 +19,6 @@ if __name__ == "__main__":
     post_data(data.to_json(), "cars")
     resp = requests.get(url + "/predict/cars" )
     
+    ## send this to the frontend.
+    
     print(resp.content)

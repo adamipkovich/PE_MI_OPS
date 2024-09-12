@@ -13,6 +13,8 @@ client = None
 signature = None
 rabbit_connection = None
 channel = None
+current_run_id = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global client, rabbit_connection, channel
@@ -40,14 +42,25 @@ async def read_root():
     return "Hello World"
     ## TODO:
 
+@app.get("/model/current")
+def get_model_state():
+    global current_run_id
+
+    if current_run_id is None:
+        return "No model is loaded"
+    else:
+        return current_run_id 
+
 @app.get("/model/{run_id}")
 def get_mlflow_model(run_id : str):
-    global model, client, signature
+    global model, client, signature, current_run_id
     mlflow.set_tracking_uri("http://127.0.0.1:5000")
     model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model")
     run_data_dict = client.get_run(run_id).data.to_dictionary()
     print(run_data_dict)
     signature = eval(run_data_dict["params"]["input"])
+    current_run_id = run_id
+    return f"Successfully loaded model {run_id}."
 
 @app.get("/predict/{queue}")
 async def predict(queue):
@@ -60,6 +73,8 @@ async def predict(queue):
     data["y_pred"] = y
     return data.to_json()
     #return     
+
+
 
 
 if __name__ == "__main__":

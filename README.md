@@ -260,6 +260,20 @@ if __name__ == "__main__":
 
 ```
 
+Ahhoz, hogy meg tudjuk hívni, és tesztelni tudjuk a kódot kell kliensoldali kód. Ezt a request csomaggal készíthetjük el.
+
+Hozzuk létre a *commands.py* scriptet, és írjuk bele a következőt:
+
+```python
+import requests
+
+if __name__ == "__main__":
+    url = "http://localhost:8000"
+    run_id = "781fd38f7a0b4ef0a7e562b11eacf8e2"
+    resp = requests.get(url + "/model/" + run_id)    
+```
+Ezzel be tudjuk tölteni a Szerverünknél a modelt az MLflowból.
+
 
 Hogy használni tudjuk a modellünket, szükségünk van adatokra, és adatok átadására. A FastAPI képes post requestekkel adatot fogadni, ugyanakkor ez nagy adathalmaznál már nem hatékony. Ezért egy brókerrendszert alkalmazunk, hogy skálázható legyen a programunk. Ez lesz a RabbitMQ. A Rabbit feladókkel (producer), fogyasztókkal (consumer) és sorokkal (queue) dolgozik alapszinten. A feladó küld egy üzenetet, (ami a mi esetünkben tartalmazza majd az adatokat) a sorba, ami eljuttatja a fogyasztónak a messaget, ahol várakozik (megfelelő beállítással), amíg vissza nem jelez a fogyasztó, hogy megkapta. Ahhot hogy csatlakozzunk a rabbitMQ szolgáltatáshoz, először telepítjük a megfelelő csomagot:
 
@@ -374,6 +388,7 @@ def get_mlflow_model(run_id : str):
     run_data_dict = client.get_run(run_id).data.to_dictionary()
     print(run_data_dict)
     signature = eval(run_data_dict["params"]["input"])
+    return 
 
 @app.get("/predict/{queue}")
 async def predict(queue):
@@ -392,8 +407,430 @@ if __name__ == "__main__":
     uvicorn.run("back_end:app", host="localhost", port=8000, reload=True)
 ```
 
+Ha a kliensoldali kódot kibővítjük, akkor a következőt kapjuk:
+
+```python
+import requests
+import pandas as pd
+import pika
+
+def post_data(data, queue_name, host = "localhost", port = 5672, user = "guest", password = "guest"):
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=host, port=port, credentials=pika.PlainCredentials(user, password)))
+    channel = connection.channel()
+    channel.queue_declare(queue=queue_name, durable=True)
+    channel.basic_publish(exchange='', routing_key=queue_name, body=data.encode('utf-8'))
+    connection.close()
+
+if __name__ == "__main__":
+    url = "http://localhost:8000"
+    run_id = "781fd38f7a0b4ef0a7e562b11eacf8e2"
+    resp = requests.get(url + "/model/" + run_id)    
+    print(resp)
+
+    data = pd.read_csv("./data/cars.csv", sep=";")
+    post_data(data.to_json(), "cars")
+    resp = requests.get(url + "/predict/cars" )
+    
+    ## send this to the frontend.
+    
+    print(resp.content)
+
+```
 
 ## Frontend: streamlit
+
+Frontend lényege, hogy egyszerűen tudjuk használni a Szerverünket, miközben minden funkcionalítást megtartunk. A frontend lecseréli majd a commands.py-t, ezen keresztül tudunk majd predikálni, és a visszakapott adatokat vizualizálni. Így nem kell lokálisan használnunk a modellünket, csökkentve az erőforrásigényt (ha a modell ki van szervezve.)
+
+Készítsünk egy egyszerű szövegalapú oldalt, amit a [streamlit](https://docs.streamlit.io/) csomag segítségével egyszerűen megoldhatunk. A streamlit widgetekkel operál, melynek elhelyzését a scriptben sorban, instrukciók alapján teszi. Így előbb lesz a gomb az oldalon, ha szövegben a legelső sorban lesz, kivéve ha definiálunk oszlopokat, *etc*.
+
+Az elemek beillesztése a rendszerbe egyszerű, ha importáljuk a streamlitet, akkor:
+
+```python
+import streamlit as st
+if st.button("Click me"):
+    st.write("You clicked me.")
+else:
+    st.write("You DID NOT click me!")
+```
+
+A script-et úgy indítjuk el, hogy:
+
+```
+streamlit run front_end.py
+```
+
+
+Itt sajnos, ha egyszer megnyomjuk a gombot, akkor úgy is marad. Ha azt akarjuk, hogy visszaállítsa a kiírást:
+
+```python
+import streamlit as st
+import time 
+
+#%% Simple interface
+if st.button("Click me"):
+    st.write("You clicked me.")
+else:
+    st.write("You DID NOT click me!")
+
+time.sleep(1)
+st.rerun() # Ez lefuttatja újra a frontendet, így tudunk trükközni.
+
+```
+
+A frontend célja, hogy lecseréljük a terminálon való kezelést, és vizualizáljunk. Ehhez az kell, be tudjuk tölteni a modellt, hogy fel tudjuk tölteni az adatot, ezt el tudjuk küldeni rabbitnak, fogadjuk az eredményt, majd a kapott eredményekre ábrát készítsünk.  
+
+
+A modellbetöltéshet 2 elem kell: egy gomb és egy input panel:
+
+```python
+## Streamlit
+import streamlit as st
+import pandas as pd
+import pika
+import requests
+
+
+#%% Simple interface
+
+host = "localhost"
+port = 5672
+user = "guest"
+password = "guest"
+url = "http://localhost:8000"
+upload = st.file_uploader("Upload CSV.")
+
+
+run_id = st.text_input("Run ID")
+if st.button("Load model"):
+    resp = requests.get(url + "/model/" + run_id) 
+    st.write(resp.content)
+else:
+    st.write("Click the button to load model.")
+```
+
+Szereljünk bele egy állapotjelzőt, hogy tudjuk van-e modell betöltve. Ehhez hozzányúlunk a *back_end.py*-hez is. Írjunk egy get-et, ahol lekérjük a run_id-t. Itt a betöltésnél lementjük, majd return-nel visszaadjuk. Így néz ki a backend módosítás után:
+
+```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
+import mlflow
+import mlflow.sklearn
+import pandas as pd
+import pika
+import time
+import logging
+
+model = None
+client = None
+signature = None
+rabbit_connection = None
+channel = None
+current_run_id = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global client, rabbit_connection, channel
+    client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
+    credentials = pika.PlainCredentials(username="guest", password="guest")
+    while rabbit_connection is None:
+        try:
+            rabbit_connection = pika.BlockingConnection(pika.ConnectionParameters(host = "localhost", port = 5672, credentials=credentials, heartbeat=0))
+        except pika.exceptions.AMQPConnectionError:
+            logging.error(f"Connection to RabbitMQ failed at localhost:5672. Retrying...")
+            time.sleep(0.3)
+    channel = rabbit_connection.channel()
+    channel.basic_qos(prefetch_count=1)
+                
+    yield
+    channel.close()
+    rabbit_connection.close()
+    return
+
+app = FastAPI(lifespan=lifespan)
+
+@app.get("/") 
+async def read_root():
+    """Default path. See /docs for more."""
+    return "Hello World"
+    ## TODO:
+
+@app.get("/model/current")
+def get_model_state():
+    global current_run_id
+
+    if current_run_id is None:
+        return "No model is loaded"
+    else:
+        return current_run_id 
+
+@app.get("/model/{run_id}")
+def get_mlflow_model(run_id : str):
+    global model, client, signature, current_run_id
+    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model")
+    run_data_dict = client.get_run(run_id).data.to_dictionary()
+    print(run_data_dict)
+    signature = eval(run_data_dict["params"]["input"])
+    current_run_id = run_id
+    return f"Successfully loaded model {run_id}."
+
+@app.get("/predict/{queue}")
+async def predict(queue):
+    global channel
+    method_frame, header_frame, body = channel.basic_get(queue)
+    data = body.decode("utf-8")
+    channel.basic_ack(method_frame.delivery_tag)
+    data = pd.read_json(data)
+    y = model.predict(data.loc[:, signature])
+    data["y_pred"] = y
+    return data.to_json()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("back_end:app", host="localhost", port=8000, reload=True)
+    
+
+```
+FONTOS: A kivételnek (/model/current) előrébb kell lennie a definícióban mint az általános megfogalmazás!
+
+Állapotjelölő a frontendben úgy jön létre, ha a végére illesztjük:
+```python
+resp = requests.get(url + "/model/current") 
+run_id = resp.content.decode("utf-8")
+st.write(f"Current model: {run_id}")
+```
+
+
+Töltsük fel az adatot a streamlithez - ehhez az st.file_uploader widgetet használjuk:
+
+
+```python
+## Streamlit
+import streamlit as st
+import pandas as pd
+import pika
+import requests
+
+
+#%% Simple interface
+
+host = "localhost"
+port = 5672
+user = "guest"
+password = "guest"
+url = "http://localhost:8000"
+upload = st.file_uploader("Upload CSV.")
+
+
+run_id = st.text_input("Run ID")
+if st.button("Load model"):
+    resp = requests.get(url + "/model/" + run_id) 
+    st.write(resp.content)
+else:
+    st.write("Click the button to load model.")
+
+resp = requests.get(url + "/model/current") 
+run_id = resp.content.decode("utf-8")
+st.write(f"Current model: {run_id}")
+
+if upload is not None:
+    data = pd.read_csv(upload, sep=";" )
+    st.table(data)
+```
+
+
+Csatlakozzunk a Rabbithoz - ezt csak küldésnél csináljuk meg most! Ha hatékonyabb rendszert szeretnénk, akkor cache-elhetjük a connection-t és a channel-t, hogy ne hozzuk újra őket minden egyes futtatásnál. Ez SOK erőforrást vesz el, ha nem demo jellegű az előadás érdemes implementálni. A cache-ről bővebben [itt](https://docs.streamlit.io/develop/concepts/architecture/caching). 
+
+Nem csinálunk mást, mint bemásoljuk a *commands.py*-ből a post_data nevű kódot.
+
+```python
+## Streamlit
+import streamlit as st
+import pandas as pd
+import pika
+import requests
+
+
+#%% Simple interface
+
+host = "localhost"
+port = 5672
+user = "guest"
+password = "guest"
+url = "http://localhost:8000"
+upload = st.file_uploader("Upload CSV.")
+
+run_id = st.text_input("Run ID")
+if st.button("Load model"):
+    resp = requests.get(url + "/model/" + run_id) 
+    st.write(resp.content)
+else:
+    st.write("Click the button to load model.")
+
+resp = requests.get(url + "/model/current") 
+run_id = resp.content.decode("utf-8")
+st.write(f"Current model: {run_id}")
+
+if upload is not None:
+    data = pd.read_csv(upload, sep=";" )
+    st.table(data)
+
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=host, port=port, credentials=pika.PlainCredentials(user, password)))
+    channel = connection.channel()
+    channel.queue_declare(queue="cars", durable=True)
+    channel.basic_publish(exchange='', routing_key="cars", body=data.to_json().encode('utf-8'))
+    connection.close()
+    resp = requests.get(url + "/predict/cars" )
+
+```
+
+Majd bővítjük, hogy be tudjuk tölteni a megkapott adatokat egy pandas dataframe-be:
+
+```python
+## Streamlit
+import streamlit as st
+import pandas as pd
+import pika
+import requests
+import json
+
+#%% Simple interface
+
+host = "localhost"
+port = 5672
+user = "guest"
+password = "guest"
+url = "http://localhost:8000"
+upload = st.file_uploader("Upload CSV.")
+
+
+run_id = st.text_input("Run ID")
+if st.button("Load model") and (run_id is not None or run_id != ""):
+    resp = requests.get(url + "/model/" + run_id) 
+    st.write(resp.content)
+else:
+    st.write("Click the button to load model.")
+
+resp = requests.get(url + "/model/current") 
+run_id = resp.content.decode("utf-8")
+st.write(f"Current model: {run_id}")
+
+if upload is not None:
+    data = pd.read_csv(upload, sep=";" )
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=host, port=port, credentials=pika.PlainCredentials(user, password)))
+    channel = connection.channel()
+    channel.queue_declare(queue="cars", durable=True)
+    channel.basic_publish(exchange='', routing_key="cars", body=data.to_json().encode('utf-8'))
+    connection.close()
+    resp = requests.get(url + "/predict/cars" ).json() ## Get a str type dict
+    data = pd.DataFrame.from_dict(json.loads(resp)) # json loads in the str to dict, from which we make a pd.DataFrame
+    st.table(data)
+```
+Írjunk ki metrikákat az st.table után:
+
+```python
+from sklearn.metrics import accuracy_score, precision_score, f1_score, recall_score
+...
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        with st.container(border=True):
+            st.write("Precision")
+            st.write(precision_score(data["Origin"], data["y_pred"],average='micro')) # non binary calculation
+
+    with col2:
+        with st.container(border=True):
+            st.write("Accuracy")
+            st.write(accuracy_score(data["Origin"], data["y_pred"]))
+
+    with col3:
+        with st.container(border=True):
+            st.write("F1 Score")
+            st.write(f1_score(data["Origin"], data["y_pred"], average='micro'))
+
+    with col4:  
+        with st.container(border=True):
+            st.write("Recall")
+            st.write(recall_score(data["Origin"], data["y_pred"],average='micro'))
+```
+
+
+
+
+Készítsünk egy heatmapet- és egy ROC curve ábrát. Teljes kód így néz ki:
+
+```python
+## Streamlit
+import streamlit as st
+import pandas as pd
+import pika
+import requests
+import json
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, precision_score, f1_score, recall_score, RocCurveDisplay
+import matplotlib.pyplot as plt
+#%% Simple interface
+
+host = "localhost"
+port = 5672
+user = "guest"
+password = "guest"
+url = "http://localhost:8000"
+upload = st.file_uploader("Upload CSV.")
+
+
+run_id = st.text_input("Run ID")
+if st.button("Load model") and (run_id is not None or run_id != ""):
+    resp = requests.get(url + "/model/" + run_id) 
+    st.write(resp.content)
+else:
+    st.write("Click the button to load model.")
+
+resp = requests.get(url + "/model/current") 
+run_id = resp.content.decode("utf-8")
+st.write(f"Current model: {run_id}")
+
+if upload is not None:
+    data = pd.read_csv(upload, sep=";" )
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=host, port=port, credentials=pika.PlainCredentials(user, password)))
+    channel = connection.channel()
+    channel.queue_declare(queue="cars", durable=True)
+    channel.basic_publish(exchange='', routing_key="cars", body=data.to_json().encode('utf-8'))
+    connection.close()
+    resp = requests.get(url + "/predict/cars" ).json()
+
+    data = pd.DataFrame.from_dict(json.loads(resp))
+    #st.table(data)
+
+   #%% SCores
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        with st.container(border=True):
+            st.write("Precision")
+            st.write(precision_score(data["Origin"], data["y_pred"],average='micro'))
+
+    with col2:
+        with st.container(border=True):
+            st.write("Accuracy")
+            st.write(accuracy_score(data["Origin"], data["y_pred"]))
+
+    with col3:
+        with st.container(border=True):
+            st.write("F1 Score")
+            st.write(f1_score(data["Origin"], data["y_pred"], average='micro'))
+
+    with col4:  
+        with st.container(border=True):
+            st.write("Recall")
+            st.write(recall_score(data["Origin"], data["y_pred"],average='micro'))
+     #%% figures - heatmap
+    st.pyplot(ConfusionMatrixDisplay.from_predictions(data["Origin"], data["y_pred"]).figure_)
+
+    # AUC
+```
+
 
 ### Virtuális környezet exportálása
 ```
