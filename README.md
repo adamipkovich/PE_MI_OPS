@@ -1,15 +1,13 @@
 # Ops óra anyaga
 
 ## Felkészülés
-EZT AKKOR HA MEGVAN AZ ANYAG!!!
 
 Szükséges:
-- python verzió (3.11.8)
+- python verzió (3.11.8, 3.12.5)
 - IDE: [VSCode](https://developer.skao.int/en/latest/howto/docker-vscode.html)/[Pycharm](https://www.jetbrains.com/help/pycharm/docker.html#install_docker)
 - [Git](https://git-scm.com/download/win)
-- [rabbitmq](https://www.rabbitmq.com/docs/install-windows) 
-
-
+- [rabbitmq](https://www.svix.com/resources/guides/rabbitmq-windows-install-guide/) 
+- Github fehasználó!
 
 
 ## Projekt másolása
@@ -18,13 +16,6 @@ Szükséges:
 
 
 ## VSCode setup
-Készítsünk egy virtuális környezetet.
-
-Aki még nem tette, tegye fel a pandas-t és a numpy-t. Ha vscode-ot használnak a balfelső sarokban található egy terminál nevü fül, ahol megnyithatunk egy
-
-Teszt...
-
-Ha nem működik, lehetséges, hogy nem az aktuális virtuális környezet van megnyitva...
 
 Kiegészítők a vscodehoz:
  - Data Viewer / data wrangler
@@ -39,10 +30,19 @@ Data wrangler az adatok vizsgálatához:
 
 ### Virtuális környezet felállítása
 
+Kattintsunk az ábrán jelölt + ikonra.
+
+![alt text](assets\readme\virtu_env.png)
+
+Felül megjelenik egy panel, ahol kiválaszthatjuk a Python-t, illetve hogy használunk-e requirements.txt-t. Itt ki vannak mentve a szükséges csomagok.
+Ha az utóbbit nem sikerül kiválasztani, akkor a következővel tudjuk telepíteni:
 ```
 pip install -r requirements.txt
 ```
+
 A szükséges csomagok a *requirements.txt* fájlban megtalálhatók, később lesz róla szó, hogyan exportálhatjuk egyszerűen! 
+
+
 
 ### Adatbeolvasás
 
