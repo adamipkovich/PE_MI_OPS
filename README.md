@@ -55,67 +55,39 @@ data = pd.read_csv("./data/cars.csv", sep=";")
 ```
 
 
-## Pycaret
+## Modelezés
 
-A pycaret egy end-to-end machine learning model csomag, mely képes az adatok előfeldolgozására, legjobb model kiválasztására, és ennek alkalmazására. Low code megközelítése, így gyorsan el lehet vele végezni rutin feladatokat. Minden fontos lépés elvégzésére képes:
+A következő projekt adott. Vannak autóink specifikus országokra tervezve, és ezeknek az autókna van számos változója. Ebből akarjuk megmondani, hogy az adott modellt hova tervezték. Megkeressük a lehető legjobb döntési fát GridSearch segítségével, majd predikálunk vele, hogy megnézzük működik-e a predikció. 
 
-![alt text](assets/readme/pycaret_funcs.avif)
-Kép a Pycaret oldaláról.
-
-
-### Klasszifikáció
-
-Mintakódot [itt](https://pycaret.gitbook.io/docs/get-started/quickstart#classification) találnak.
-
-Folytassuk az *model.py* írását. Az importokhoz írjuk, hogy:
-```python
-from pycaret.classification import *
-```
-
-Majd folytassuk a kódolást az adatbeolvasás után:
+A kód a következő:
 
 ```python
-s = setup(data, target = "Origin")
+import numpy as np
+import pandas as pd
+
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import  GridSearchCV
+
+#%% Load data
+data = pd.read_csv("./data/cars.csv", sep=";")
+
+ind = data["Car"]
+y = data["Origin"]
+X = data.drop(columns=["Origin", "Car"])
+
+hyper_params ={'criterion': ['gini', 'entropy', 'log_loss'],
+                        'ccp_alpha': [0.1, 0.01, 0.001],
+                        'max_depth': np.arange(2, 10, 1), }
+
+
+#%% Train with gridsearch...
+
+clf = GridSearchCV(DecisionTreeClassifier(), hyper_params, cv=5)
+clf.fit(X, y) # train the model
+model = clf.best_estimator_
+score = clf.best_score_
+y_hat = clf.predict(X)
 ```
-
-És készítsünk egy model összehasonlítást:
-```python
-best = compare_models()
-```
-
-Ha futtatjuk a következő eredmény kapjuk a terminálba:
-
-![alt text](assets/readme/class_res.png)
-
-A -best- változóval megkapjuk a modelt, amit később predikáláshoz használhatunk. Az "et" Extra trees classifier, ami több decision tree-t tanít be, az összes adaton.
-
-Írjuk a kódhoz, hogy:
-
-```python
-plot_model(best, plot = 'confusion_matrix')
-```
-Melynek eredménye:
-
-![alt text](assets/readme/conf_matrix.png)
-
-Nézzük meg, lehet-e ezzel predikálni. Használjuk a data változóra a *prediction* függvényt:
-
-```python
-predictions = predict_model(best, data=data, raw_score=True)
-```
-
-Később fontos lesz, hogy ki tudjunk menteni, és be tudjunk tölteni bizonyos modelleket. Ezért nézzük meg, hogy működnek-e ezek a funckiók!
-
-```python
-save_model(best, 'my_best_pipeline')
-```
-
-```python
-loaded_model = load_model('my_best_pipeline')
-```
-Ha minden jól ment, akkor megjelenik egy *my_best_pipeline.pkl* nevű fájl a könyvtárunkban.
-
-Megjegyzés: Ahhoz hogy a modelt be lehessen tölteni, a kísérletet is be kell tölteni! Ez kimenthető a "save_experiment" függvénnyel, és betölthető a "load_experiment" függvénnyel.
 
 ## MLflow
 
@@ -133,25 +105,86 @@ Hirtelen megjelenik majd a könyvtárunkban az *mlruns* nevű mappa, itt találh
 Általában a következő linkkel nyitható meg a User Interface:
 http://127.0.0.1:5000
 
-A kísérletünket a "setup" függvény módosításával trackelhetjük:
+A *model.py* kódunkat a mlflow csomagjának segítségével kibővítjük, hogy lementse az modelt, és az inputok nevét.
+
 ```python
-s = setup(data, target = "Origin", log_experiment = True, experiment_name = 'cars')
+import numpy as np
+import pandas as pd
+
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import  GridSearchCV
+
+import mlflow
+from mlflow.tracking import MlflowClient
+import mlflow.sklearn
+
+
+#%% Load data
+data = pd.read_csv("./data/cars.csv", sep=";")
+
+ind = data["Car"]
+y = data["Origin"]
+X = data.drop(columns=["Origin", "Car"])
+
+hyper_params ={'criterion': ['gini', 'entropy', 'log_loss'],
+                        'ccp_alpha': [0.1, 0.01, 0.001],
+                        'max_depth': np.arange(2, 10, 1), }
+
+
+#%% Train with gridsearch...
+
+clf = GridSearchCV(DecisionTreeClassifier(), hyper_params, cv=5)
+clf.fit(X, y) # train the model
+model = clf.best_estimator_
+score = clf.best_score_
+y_hat = clf.predict(X)
+#cm = confusion_matrix(y, y_hat, normalize='true')
+
+#%% Save with Mlflow
+mlflow.set_tracking_uri("http://127.0.0.1:5000") # To which server to upload
+client = MlflowClient("http://127.0.0.1:5000") 
+name = "cars" 
+try:
+        client.create_experiment(name)
+except Exception as e:
+            pass   
+experiment_id = client.get_experiment_by_name(name).experiment_id
+
+with mlflow.start_run(experiment_id=experiment_id):
+    run_id = mlflow.active_run().info.run_id
+    mlflow.sklearn.log_model(model, "model")
+    mlflow.log_param("input", X.columns.to_list())
+    
+
 ```
+
 Ha elnavigálunk az mlflow UI-ja, a következőt látjuk:
 ![alt text](assets\readme\mlflow_model.png)
 
 
-https://towardsdatascience.com/easy-mlops-with-pycaret-mlflow-7fbcbf1e38c6
 
 ### Hogyan töltünk be elmentett modelleket?
 
 A betöltést egy külön fájlban fejlezstjük - nem akarjuk hogy mindig újratanítson, pont elég ha a modelt töltjük be!
 Mivel a másik terminálban már a szerver fut, ezért új terminált kell nyitni.
 
-Amint létrehoztuk *load_model.py* fájlt, 
+Amint létrehoztuk *load_model.py* fájlt, ezt írjuk bele:
+
+```python
+import mlflow
+import pandas as pd
 
 
+mlflow.set_tracking_uri("http://127.0.0.1:5000") # must have!
+run_id = "4351d55a1fbc445e968b8c573cf5f1be" # run id of a given model
+model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model") ## sklearn model's load
+data = pd.read_csv("./data/cars.csv", sep=";") ## reread data
+client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000") # get info
+run_data_dict = client.get_run(run_id).data.to_dictionary() # get input names
 
+print(model.predict(data.drop(columns=["Origin", "Car"])))
+```
+Ezzel a módszerrel betöltjük az mlflow-ról a modelt.
 ## FastAPI és RabbitMQ 
 A FastAPI egy RestAPI-t követő csomag API-ok létrehozásához. A uvicorn egy backendet futtató, Flasken alapuló csomag, amivek könnyen tudjuk futtatni a FastAPI által létrehozott API-t.
 
@@ -177,7 +210,8 @@ if __name__ == "__main__":
     uvicorn.run("back_end:app", host="localhost", port=8000, reload=True)
 ```
 Ha navigálunk az általunk megadott IP-címre:
-![alt text](image.png)
+
+![alt text](assets\readme\docs.png)
 
 FastAPI-nak van egy "docs" nevű oldala, amit a következő linken érünk el:
 
@@ -198,7 +232,7 @@ def get_mlflow_model(run_id): # run_id of the run we want to load in - see load_
 
 ```
 
-Ez önmagában nem fog működni, ugyanis a FastAPI-nak szüksege van a mlflow uré-jére hogy tudjon vele kommunikálni. Egy lifespan függvény fogunk definiálni, ami a szervel felállításánál és leállításánál meghívódik:
+Ez önmagában nem fog működni, ugyanis a FastAPI-nak szüksege van a mlflow url-jére hogy tudjon vele kommunikálni. Egy lifespan függvényt fogunk definiálni, ami a szerver felállításánál és leállításánál meghívódik:
 
 ```python
 from contextlib import asynccontextmanager # to the imports
@@ -216,7 +250,7 @@ app = FastAPI(lifespan=lifespan)
 # here comes API commands and if __main__ ...
 
 ```
-Jésöbb hozzáadhatjuk, hogy a lementett input neveket is betöltsük. A Teljes kód így néz ki:
+Késöbb hozzáadhatjuk, hogy a lementett input neveket is betöltsük. A teljes kód így néz ki:
 
 ```python
 ## FastAPI
@@ -269,13 +303,13 @@ import requests
 
 if __name__ == "__main__":
     url = "http://localhost:8000"
-    run_id = "781fd38f7a0b4ef0a7e562b11eacf8e2"
+    run_id = "781fd38f7a0b4ef0a7e562b11eacf8e2" # your mlflow run_id please
     resp = requests.get(url + "/model/" + run_id)    
 ```
-Ezzel be tudjuk tölteni a Szerverünknél a modelt az MLflowból.
+Ezzel be tudjuk tölteni a szerverünknél a modelt az MLflowból.
 
 
-Hogy használni tudjuk a modellünket, szükségünk van adatokra, és adatok átadására. A FastAPI képes post requestekkel adatot fogadni, ugyanakkor ez nagy adathalmaznál már nem hatékony. Ezért egy brókerrendszert alkalmazunk, hogy skálázható legyen a programunk. Ez lesz a RabbitMQ. A Rabbit feladókkel (producer), fogyasztókkal (consumer) és sorokkal (queue) dolgozik alapszinten. A feladó küld egy üzenetet, (ami a mi esetünkben tartalmazza majd az adatokat) a sorba, ami eljuttatja a fogyasztónak a messaget, ahol várakozik (megfelelő beállítással), amíg vissza nem jelez a fogyasztó, hogy megkapta. Ahhot hogy csatlakozzunk a rabbitMQ szolgáltatáshoz, először telepítjük a megfelelő csomagot:
+Hogy használni tudjuk a modellünket, szükségünk van adatokra, és adatok átadására. A FastAPI képes post requestekkel adatot fogadni, ugyanakkor ez nagy adathalmaznál már nem hatékony. Ezért egy brókerrendszert alkalmazunk, hogy skálázható legyen a programunk. Ez lesz a RabbitMQ. A Rabbit feladókkel (producer), fogyasztókkal (consumer) és sorokkal (queue) dolgozik alapszinten. A feladó küld egy üzenetet, (ami a mi esetünkben tartalmazza majd az adatokat) a sorba, ami eljuttatja a fogyasztónak a messaget, ahol várakozik (megfelelő beállítással), amíg vissza nem jelez a fogyasztó, hogy megkapta. Ahhoz, hogy csatlakozzunk a rabbitMQ szolgáltatáshoz, először telepítjük a megfelelő csomagot:
 
 ```
 pip install pika
@@ -407,7 +441,7 @@ if __name__ == "__main__":
     uvicorn.run("back_end:app", host="localhost", port=8000, reload=True)
 ```
 
-Ha a kliensoldali kódot kibővítjük, akkor a következőt kapjuk:
+Ha a kliensoldali kódot kibővítjük, hogy meg tudjuk hívni az url-t, akkor a következőt kapjuk a *commands.py*-ben:
 
 ```python
 import requests
