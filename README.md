@@ -20,6 +20,7 @@ Szükséges:
 Kiegészítők a vscodehoz:
  - Data Viewer / data wrangler
  - Error lens
+ - Python Development Extension Pack for VS Code
 
 
 Ezt látjuk ha az errorlenst beütjük az extensions-höz (3 + 1 kocka ikon az oldalmenün):
@@ -175,14 +176,16 @@ import mlflow
 import pandas as pd
 
 
-mlflow.set_tracking_uri("http://127.0.0.1:5000") # must have!
-run_id = "4351d55a1fbc445e968b8c573cf5f1be" # run id of a given model
-model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model") ## sklearn model's load
-data = pd.read_csv("./data/cars.csv", sep=";") ## reread data
-client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000") # get info
-run_data_dict = client.get_run(run_id).data.to_dictionary() # get input names
+mlflow.set_tracking_uri("http://127.0.0.1:5000") 
+run_id = "05db52571628456583b07cf2d94ae00e"
 
-print(model.predict(data.drop(columns=["Origin", "Car"])))
+model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model")
+
+#%% működik-e?
+data = pd.read_csv("./data/cars.csv", sep=";")
+client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
+run_data_dict = client.get_run(run_id).data.to_dictionary()
+print(model.predict(data.loc[:, eval(run_data_dict["params"]["input"])]))
 ```
 Ezzel a módszerrel betöltjük az mlflow-ról a modelt.
 ## FastAPI és RabbitMQ 
