@@ -193,6 +193,10 @@ A FastAPI egy RestAPI-t követő csomag API-ok létrehozásához. A uvicorn egy 
 
 Egy gyors hello world alkalmazás egy API felállításához. 
 
+```
+pip install fastapi uvicorn
+```
+
 ```python
 
 from fastapi import FastAPI, Request, BackgroundTasks
@@ -227,12 +231,34 @@ Ezt nézze meg mindenki magának!
 A rendszert bővíthetjük úgy hogy ha postolunk egy parancsot, akkor akkor betöltse az adott mlflow modelt. 
 
 ```python
-model = None
-@app.post("/model/{run_id}") ## API decortar
-def get_mlflow_model(run_id): # run_id of the run we want to load in - see load_model.py
-    global model
-    model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model")
+from fastapi import FastAPI
+import mlflow
 
+
+model = None
+signature = None
+app = FastAPI()
+
+@app.get("/") 
+async def read_root():
+    """Default path. See /docs for more."""
+    return "Hello World"
+
+
+@app.get("/model/{run_id}")
+def get_mlflow_model(run_id):
+    global model, signature
+    mlflow.set_tracking_uri("http://127.0.0.1:5000") 
+    model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model")
+    client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
+    run_data_dict = client.get_run(run_id).data.to_dictionary()  
+    signature = eval(run_data_dict["params"]["input"])
+    return signature
+#%% működik-e?
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("back_end:app", host="localhost", port=8000, reload=True)
 ```
 
 Ez önmagában nem fog működni, ugyanis a FastAPI-nak szüksege van a mlflow url-jére hogy tudjon vele kommunikálni. Egy lifespan függvényt fogunk definiálni, ami a szerver felállításánál és leállításánál meghívódik:
@@ -297,7 +323,15 @@ if __name__ == "__main__":
 
 ```
 
+![alt text](image.png)
+
 Ahhoz, hogy meg tudjuk hívni, és tesztelni tudjuk a kódot kell kliensoldali kód. Ezt a request csomaggal készíthetjük el.
+
+```
+pip install requests
+```
+
+* Terminálba minden folyamatot ctrl-c megszakíthatunk!*
 
 Hozzuk létre a *commands.py* scriptet, és írjuk bele a következőt:
 
@@ -567,6 +601,7 @@ current_run_id = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global client, rabbit_connection, channel
+    mlflow.set_tracking_uri("http://127.0.0.1:5000")
     client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
     credentials = pika.PlainCredentials(username="guest", password="guest")
     while rabbit_connection is None:
