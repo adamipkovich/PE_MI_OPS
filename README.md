@@ -20,7 +20,7 @@ Szükséges:
 Kiegészítők a vscodehoz:
  - Data Viewer / data wrangler
  - Error lens
- - yaml
+
 
 Ezt látjuk ha az errorlenst beütjük az extensions-höz (3 + 1 kocka ikon az oldalmenün):
 ![alt text](assets/readme/extensions.png)
