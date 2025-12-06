@@ -1,912 +1,402 @@
-# Ops óra anyaga
+# 🤖 ML Platform - SOLID Elvekkel Tervezett Machine Learning Rendszer
 
-## Felkészülés
+## 📖 Projekt Áttekintés
 
-Szükséges:
-- python verzió (3.11.8, 3.12.5)
-- IDE: [VSCode](https://developer.skao.int/en/latest/howto/docker-vscode.html)/[Pycharm](https://www.jetbrains.com/help/pycharm/docker.html#install_docker)
-- [Git](https://git-scm.com/download/win)
-- [rabbitmq](https://www.svix.com/resources/guides/rabbitmq-windows-install-guide/) 
-- Github fehasználó!
+Ez a projekt egy **átfogó 2 órás tutorial**, amely bemutatja, hogyan építsünk egy production-ready machine learning platformot a **SOLID tervezési elvek** alkalmazásával.
 
+### 🎯 Főbb Technológiák
 
-## Projekt másolása
+- **FastAPI** - REST API backend
+- **RabbitMQ** - Message broker (aszinkron kommunikáció)
+- **Streamlit** - Interaktív frontend
+- **Scikit-learn** - Machine learning
+- **Docker** - Konténerizáció
+- **UV** - Gyors Python package management
 
-![projekt_open](assets/readme/project_copy_git.png)
-
-
-## VSCode setup
-
-Kiegészítők a vscodehoz:
- - Data Viewer / data wrangler
- - Error lens
- - Python Development Extension Pack for VS Code
-
-
-Ezt látjuk ha az errorlenst beütjük az extensions-höz (3 + 1 kocka ikon az oldalmenün):
-![alt text](assets/readme/extensions.png)
-
-Data wrangler az adatok vizsgálatához:
-![alt text](assets/readme/data_wrangler.png)
-
-### Virtuális környezet felállítása
-
-Kattintsunk az ábrán jelölt + ikonra.
-
-![alt text](assets/readme/virtu_env.png)
-
-Felül megjelenik egy panel, ahol kiválaszthatjuk a Python-t, illetve hogy használunk-e requirements.txt-t. Itt ki vannak mentve a szükséges csomagok.
-Ha az utóbbit nem sikerül kiválasztani, akkor a következővel tudjuk telepíteni:
-```
-pip install -r requirements.txt
-```
-
-A szükséges csomagok a *requirements.txt* fájlban megtalálhatók, később lesz róla szó, hogyan exportálhatjuk egyszerűen! 
-
-
-
-### Adatbeolvasás
-
-A könyvtárban található cars.csv adatsorral dolgozunk.
-Hozzunk létre *model.py* nevű fájlt. Töltsük be az adatokat:
-
-```python
-import pandas as pd
-data = pd.read_csv("./data/cars.csv", sep=";")
-```
-
-
-## Modelezés
-
-A következő projekt adott. Vannak autóink specifikus országokra tervezve, és ezeknek az autókna van számos változója. Ebből akarjuk megmondani, hogy az adott modellt hova tervezték. Megkeressük a lehető legjobb döntési fát GridSearch segítségével, majd predikálunk vele, hogy megnézzük működik-e a predikció. 
-
-A kód a következő:
-
-```python
-import numpy as np
-import pandas as pd
-
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.model_selection import  GridSearchCV
-
-#%% Load data
-data = pd.read_csv("./data/cars.csv", sep=";")
-
-ind = data["Car"]
-y = data["Origin"]
-X = data.drop(columns=["Origin", "Car"])
-
-hyper_params ={'criterion': ['gini', 'entropy', 'log_loss'],
-                        'ccp_alpha': [0.1, 0.01, 0.001],
-                        'max_depth': np.arange(2, 10, 1), }
-
-
-#%% Train with gridsearch...
-
-clf = GridSearchCV(DecisionTreeClassifier(), hyper_params, cv=5)
-clf.fit(X, y) # train the model
-model = clf.best_estimator_
-score = clf.best_score_
-y_hat = clf.predict(X)
-```
-
-## MLflow
-
-Az MLflow egy [MLops](https://ml-ops.org/) csomag a python gépi tanulási környezethez. Széleskörben használt, főbb céljai a lefuttatott modellek elmentése ("loggolása"), és eltárolása. Négy főbb funkciót lát el:
-![alt text](assets\readme\mlflow_funcs.png)
-
-Melyből jelenleg az MLflow Trackinget fogjuk használni. Ez elmenti a futtatást egy központi szerverre, majd ad neki egy git-szerű ID-t. Ez egy __run__. A __run__-okat egy __Experiment__ tömöríti. Érdemes ezt adatsorokhoz kötni, így az __Experiment__ objektumban az inputok, és outputok hasonlóak lesznek, de ez __NEM__ egy szabály! Az MLProject még fontos funkciót ad. Becsomagolja egy olyan formátumba a modellünket, amiből egyszerűen tudunk telepíteni, és használni modelleket. 
-
-Indítsunk el egy lokális szervert, ami nyomon követi a modelltanítási tevékenységünket:
+### 🏗️ Architektúra
 
 ```
-mlflow server
-```
-Hirtelen megjelenik majd a könyvtárunkban az *mlruns* nevű mappa, itt találhatóak majd a különböző futtatások eredményei.
-Általában a következő linkkel nyitható meg a User Interface:
-http://127.0.0.1:5000
-
-A *model.py* kódunkat a mlflow csomagjának segítségével kibővítjük, hogy lementse az modelt, és az inputok nevét.
-
-```python
-import numpy as np
-import pandas as pd
-
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.model_selection import  GridSearchCV
-
-import mlflow
-from mlflow.tracking import MlflowClient
-import mlflow.sklearn
-
-
-#%% Load data
-data = pd.read_csv("./data/cars.csv", sep=";")
-
-ind = data["Car"]
-y = data["Origin"]
-X = data.drop(columns=["Origin", "Car"])
-
-hyper_params ={'criterion': ['gini', 'entropy', 'log_loss'],
-                        'ccp_alpha': [0.1, 0.01, 0.001],
-                        'max_depth': np.arange(2, 10, 1), }
-
-
-#%% Train with gridsearch...
-
-clf = GridSearchCV(DecisionTreeClassifier(), hyper_params, cv=5)
-clf.fit(X, y) # train the model
-model = clf.best_estimator_
-score = clf.best_score_
-y_hat = clf.predict(X)
-#cm = confusion_matrix(y, y_hat, normalize='true')
-
-#%% Save with Mlflow
-mlflow.set_tracking_uri("http://127.0.0.1:5000") # To which server to upload
-client = MlflowClient("http://127.0.0.1:5000") 
-name = "cars" 
-try:
-        client.create_experiment(name)
-except Exception as e:
-            pass   
-experiment_id = client.get_experiment_by_name(name).experiment_id
-
-with mlflow.start_run(experiment_id=experiment_id):
-    run_id = mlflow.active_run().info.run_id
-    mlflow.sklearn.log_model(model, "model")
-    mlflow.log_param("input", X.columns.to_list())
-    
-
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   Frontend   │────▶│   RabbitMQ   │────▶│   Backend    │
+│  (Streamlit) │◀────│  (Messages)  │◀────│  (FastAPI)   │
+└──────────────┘     └──────────────┘     └──────────────┘
+       │                                          │
+       └──────────────────┬───────────────────────┘
+                     ML Models
+                   (Persistence)
 ```
 
-Ha elnavigálunk az mlflow UI-ja, a következőt látjuk:
-![alt text](assets\readme\mlflow_model.png)
+---
 
+## 📚 Tutorial Anyagok
 
+A projekt 5 részletes tutorialt tartalmaz:
 
-### Hogyan töltünk be elmentett modelleket?
+1. **[01_SOLID_bevezetes.md](tutorial/01_SOLID_bevezetes.md)** - SOLID alapelvek bemutatása
+2. **[02_Data_Streaming_modul.md](tutorial/02_Data_Streaming_modul.md)** - RabbitMQ messaging
+3. **[03_ML_Backend_modul.md](tutorial/03_ML_Backend_modul.md)** - FastAPI + ML services
+4. **[04_Frontend_modul.md](tutorial/04_Frontend_modul.md)** - Streamlit UI komponensek
+5. **[05_Docker_setup.md](tutorial/05_Docker_setup.md)** - Docker konténerizáció
 
-A betöltést egy külön fájlban fejlezstjük - nem akarjuk hogy mindig újratanítson, pont elég ha a modelt töltjük be!
-Mivel a másik terminálban már a szerver fut, ezért új terminált kell nyitni.
+Minden tutorial tartalmazza:
+- ✅ Problémameghatározás
+- ✅ SOLID elvek alkalmazása
+- ✅ Lépésről-lépésre implementáció
+- ✅ Kód példák
+- ✅ Tesztelési útmutató
 
-Amint létrehoztuk *load_model.py* fájlt, ezt írjuk bele:
+---
 
-```python
-import mlflow
-import pandas as pd
+## 🚀 Gyors Start (Docker)
 
+### Előfeltételek
 
-mlflow.set_tracking_uri("http://127.0.0.1:5000") 
-run_id = "05db52571628456583b07cf2d94ae00e"
+- Docker
+- Docker Compose
 
-model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model")
+### Indítás
 
-#%% működik-e?
-data = pd.read_csv("./data/cars.csv", sep=";")
-client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
-run_data_dict = client.get_run(run_id).data.to_dictionary()
-print(model.predict(data.loc[:, eval(run_data_dict["params"]["input"])]))
-```
-Ezzel a módszerrel betöltjük az mlflow-ról a modelt.
-## FastAPI és RabbitMQ 
-A FastAPI egy RestAPI-t követő csomag API-ok létrehozásához. A uvicorn egy backendet futtató, Flasken alapuló csomag, amivek könnyen tudjuk futtatni a FastAPI által létrehozott API-t.
+```bash
+# 1. Klónozd a repository-t
+git clone <repo-url>
+cd MLOPS
 
-Egy gyors hello world alkalmazás egy API felállításához. 
+# 2. Build és indítás
+docker-compose up -d --build
 
-```
-pip install fastapi uvicorn
-```
-
-```python
-
-from fastapi import FastAPI, Request, BackgroundTasks
-import mlflow
-
-
-app = FastAPI()
-
-@app.get("/") 
-async def read_root():
-    """Default path. See /docs for more."""
-    return "Hello World"
-    ## TODO:
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("back_end:app", host="localhost", port=8000, reload=True)
-```
-Ha navigálunk az általunk megadott IP-címre:
-
-![alt text](assets\readme\docs.png)
-
-FastAPI-nak van egy "docs" nevű oldala, amit a következő linken érünk el:
-
-```
-http://localhost:8000/docs
+# 3. Ellenőrzés
+docker-compose ps
 ```
 
-Ezt nézze meg mindenki magának!
+### Elérések
 
-A rendszert bővíthetjük úgy hogy ha postolunk egy parancsot, akkor akkor betöltse az adott mlflow modelt. 
+- **Frontend (Streamlit)**: http://localhost:8501
+- **Backend API**: http://localhost:8000
+- **API Dokumentáció**: http://localhost:8000/docs
+- **RabbitMQ Management**: http://localhost:15672 (guest/guest)
 
-```python
-from fastapi import FastAPI
-import mlflow
+---
 
-
-model = None
-signature = None
-app = FastAPI()
-
-@app.get("/") 
-async def read_root():
-    """Default path. See /docs for more."""
-    return "Hello World"
-
-
-@app.get("/model/{run_id}")
-def get_mlflow_model(run_id):
-    global model, signature
-    mlflow.set_tracking_uri("http://127.0.0.1:5000") 
-    model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model")
-    client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
-    run_data_dict = client.get_run(run_id).data.to_dictionary()  
-    signature = eval(run_data_dict["params"]["input"])
-    return signature
-#%% működik-e?
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("back_end:app", host="localhost", port=8000, reload=True)
-```
-
-Ez önmagában nem fog működni, ugyanis a FastAPI-nak szüksege van a mlflow url-jére hogy tudjon vele kommunikálni. Egy lifespan függvényt fogunk definiálni, ami a szerver felállításánál és leállításánál meghívódik:
-
-```python
-from contextlib import asynccontextmanager # to the imports
-...
-@asynccontextmanager # soon after imports
-async def lifespan(app: FastAPI):
-    # at start
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
-    yield
-    # at stop
-    return
-# after asnyccontextmanager
-app = FastAPI(lifespan=lifespan)
-...
-# here comes API commands and if __main__ ...
+## 📂 Projekt Struktúra
 
 ```
-Késöbb hozzáadhatjuk, hogy a lementett input neveket is betöltsük. A teljes kód így néz ki:
-
-```python
-## FastAPI
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
-import mlflow
-import mlflow.sklearn
-import pandas as pd
-
-model = None
-client = None
-signature = None
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global client
-    client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
-    yield
-    return
-
-app = FastAPI(lifespan=lifespan)
-
-@app.get("/") 
-async def read_root():
-    """Default path. See /docs for more."""
-    return "Hello World"
-
-@app.get("/model/{run_id}")
-def get_mlflow_model(run_id : str):
-    """Loads a model from the tracking server, by run_id"""
-    global model, client, signature
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
-    model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model")
-    run_data_dict = client.get_run(run_id).data.to_dictionary()
-    print(run_data_dict)
-    signature = eval(run_data_dict["params"]["input"])
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("back_end:app", host="localhost", port=8000, reload=True)
-
+MLOPS/
+├── app/                          # Data Streaming modul
+│   └── streaming/
+│       ├── base_connection.py    # Absztrakt interfész (DIP)
+│       ├── rabbitmq_connection.py # RabbitMQ implementáció
+│       ├── producer.py           # Üzenetek küldése
+│       └── consumer.py           # Üzenetek fogadása
+│
+├── backend/                      # ML Backend modul
+│   ├── main.py                   # FastAPI app
+│   ├── services/
+│   │   ├── model_storage.py      # Model I/O (SRP)
+│   │   ├── training_service.py   # Training logika (SRP, DIP)
+│   │   └── prediction_service.py # Prediction logika (SRP, DIP)
+│   └── models/
+│       └── saved/                # Mentett modellek
+│
+├── frontend/                     # Streamlit Frontend
+│   ├── app.py                    # Main app
+│   ├── components/
+│   │   ├── model_selector.py    # Model választó (SRP)
+│   │   ├── data_uploader.py     # Adat feltöltő (SRP)
+│   │   └── results_display.py   # Eredmények (SRP)
+│   └── utils/
+│       └── api_client.py         # Backend kommunikáció (SRP)
+│
+├── docker/                       # Docker konfiguráció
+│   ├── Dockerfile.backend        # Backend image
+│   └── Dockerfile.frontend       # Frontend image
+│
+├── tutorial/                     # Tutorial anyagok
+│   ├── 01_SOLID_bevezetes.md
+│   ├── 02_Data_Streaming_modul.md
+│   ├── 03_ML_Backend_modul.md
+│   ├── 04_Frontend_modul.md
+│   └── 05_Docker_setup.md
+│
+├── data/                         # Adatok
+│   └── cars.csv
+│
+├── docker-compose.yml            # Orchestration
+├── requirements-backend.txt      # Backend dependencies
+├── requirements-frontend.txt     # Frontend dependencies
+└── .dockerignore                 # Docker build optimization
 ```
 
-![alt text](image.png)
+---
 
-Ahhoz, hogy meg tudjuk hívni, és tesztelni tudjuk a kódot kell kliensoldali kód. Ezt a request csomaggal készíthetjük el.
+## 🎓 SOLID Elvek Alkalmazása
 
-```
-pip install requests
-```
+### Single Responsibility Principle (SRP)
 
-* Terminálba minden folyamatot ctrl-c megszakíthatunk!*
+Minden osztály egy felelősséggel:
+- `ModelStorage` → csak I/O műveletek
+- `TrainingService` → csak model tanítás
+- `PredictionService` → csak predikció
+- `Producer` → csak üzenetküldés
+- `Consumer` → csak üzenetfogadás
 
-Hozzuk létre a *commands.py* scriptet, és írjuk bele a következőt:
+### Open/Closed Principle (OCP)
 
-```python
-import requests
+Rendszer nyitott bővítésre, zárt módosításra:
+- Új message broker támogatása (pl. Kafka) új class-szal
+- Új model típusok hozzáadása módosítás nélkül
 
-if __name__ == "__main__":
-    url = "http://localhost:8000"
-    run_id = "781fd38f7a0b4ef0a7e562b11eacf8e2" # your mlflow run_id please
-    resp = requests.get(url + "/model/" + run_id)    
-```
-Ezzel be tudjuk tölteni a szerverünknél a modelt az MLflowból.
+### Liskov Substitution Principle (LSP)
 
+Interfészek helyettesíthetők:
+- `BaseConnection` implementációk cserélhetők
+- Service-ek mock objektumokkal tesztelhetők
 
-Hogy használni tudjuk a modellünket, szükségünk van adatokra, és adatok átadására. A FastAPI képes post requestekkel adatot fogadni, ugyanakkor ez nagy adathalmaznál már nem hatékony. Ezért egy brókerrendszert alkalmazunk, hogy skálázható legyen a programunk. Ez lesz a RabbitMQ. A Rabbit feladókkel (producer), fogyasztókkal (consumer) és sorokkal (queue) dolgozik alapszinten. A feladó küld egy üzenetet, (ami a mi esetünkben tartalmazza majd az adatokat) a sorba, ami eljuttatja a fogyasztónak a messaget, ahol várakozik (megfelelő beállítással), amíg vissza nem jelez a fogyasztó, hogy megkapta. Ahhoz, hogy csatlakozzunk a rabbitMQ szolgáltatáshoz, először telepítjük a megfelelő csomagot:
+### Interface Segregation Principle (ISP)
 
-```
-pip install pika
-```
+Kis, specifikus interfészek:
+- `Trainable` és `Predictable` külön interfészek
+- UI komponensek csak szükséges metódusokat használnak
 
-Majd indulásnál a következő kódsort használjuk:
+### Dependency Inversion Principle (DIP)
 
+Függés absztrakciótól:
+- Service-ek dependency injection-nel kapják függőségeiket
+- FastAPI függőségek absztrakciók (Depends)
 
-```python
-import pika
-rabbit_connection = None
-channel = None
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global client, rabbit_connection, channel
-    client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
-    credentials = pika.PlainCredentials(username="guest", password="guest")
-    while rabbit_connection is None:
-        try:
-            rabbit_connection = pika.BlockingConnection(pika.ConnectionParameters(host = "localhost", port = 5672, credentials=credentials, heartbeat=0))
-        except pika.exceptions.AMQPConnectionError:
-            logging.error(f"Connection to RabbitMQ failed at localhost:5672. Retrying...")
-            time.sleep(0.3)
-    channel = rabbit_connection.channel()
-    channel.basic_qos(prefetch_count=1)
-    yield
-    channel.close()
-    rabbit_connection.close()
-    return
-```
-Ez a kód indulásnál már csatlakozik a Rabbit szolgáltatáshoz, így nekünk már nem kell törődni vele.
+---
 
-A feladó kódját külön definiáljuk, ez egy kliensoldali alkalmazás lesz:
-```python
-def post_data(data, queue_name, host = "localhost", port = 5672, user = "guest", password = "guest"):
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host=host, port=port, credentials=pika.PlainCredentials(user, password)))
-    channel = connection.channel()
-    channel.queue_declare(queue=queue_name, durable=True)
-    channel.basic_publish(exchange='', routing_key=queue_name, body=data.encode('utf-8'))
-    connection.close()
+## 🔧 Fejlesztés
 
+### Lokális Futtatás (Python környezet)
+
+```bash
+# 1. Virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# 2. Dependencies telepítése
+pip install -r requirements-backend.txt
+pip install -r requirements-frontend.txt
+
+# 3. RabbitMQ indítása (Docker)
+docker run -d -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+
+# 4. Backend indítása
+python -m uvicorn backend.main:app --reload
+
+# 5. Frontend indítása (új terminál)
+streamlit run frontend/app.py
 ```
 
-Connection, channel, publish, queue declare, etc magyarázása...
+### Docker Fejlesztés
 
-Ezután készítünk egy get command URL-t a predikcióhoz:
-```python
+```bash
+# Build
+docker-compose build
 
-@app.get("/predict/{queue}")
-async def predict(queue):
-    global channel
-    method_frame, header_frame, body = channel.basic_get(queue)
-    data = body.decode("utf-8")
-    channel.basic_ack(method_frame.delivery_tag)
-    data = pd.read_json(data)
-    return pd.DataFrame(model.predict(data.loc[:, signature])).to_json() 
+# Indítás detached mode-ban
+docker-compose up -d
 
+# Logok követése
+docker-compose logs -f
+
+# Egy service újraindítása
+docker-compose restart backend
+
+# Leállítás
+docker-compose down
 ```
 
-Végül a kód így néz ki:
+---
 
-```python
-## FastAPI
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
-import mlflow
-import mlflow.sklearn
-import pandas as pd
-import pika
-import time
-import logging
+## 📊 Használat
 
-model = None
-client = None
-signature = None
-rabbit_connection = None
-channel = None
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global client, rabbit_connection, channel
-    client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
-    credentials = pika.PlainCredentials(username="guest", password="guest")
-    while rabbit_connection is None:
-        try:
-            rabbit_connection = pika.BlockingConnection(pika.ConnectionParameters(host = "localhost", port = 5672, credentials=credentials, heartbeat=0))
-        except pika.exceptions.AMQPConnectionError:
-            logging.error(f"Connection to RabbitMQ failed at localhost:5672. Retrying...")
-            time.sleep(0.3)
-    channel = rabbit_connection.channel()
-    channel.basic_qos(prefetch_count=1)
-                
-    yield
-    channel.close()
-    rabbit_connection.close()
-    return
+### 1. Model Tanítás
 
-app = FastAPI(lifespan=lifespan)
+1. Nyisd meg: http://localhost:8501
+2. Menj a **"Model Training"** oldalra
+3. Töltsd fel a `data/cars.csv` fájlt
+4. Válaszd ki a **target column**-t (pl. `Origin`)
+5. Kattints a **"Train"** gombra
+6. Model mentésre kerül: `backend/models/saved/`
 
-@app.get("/") 
-async def read_root():
-    """Default path. See /docs for more."""
-    return "Hello World"
-    ## TODO:
+### 2. Model Betöltés
 
-@app.get("/model/{run_id}")
-def get_mlflow_model(run_id : str):
-    global model, client, signature
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
-    model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model")
-    run_data_dict = client.get_run(run_id).data.to_dictionary()
-    print(run_data_dict)
-    signature = eval(run_data_dict["params"]["input"])
-    return 
+1. Menj a **"Prediction"** oldalra
+2. Válaszd ki a tanított modelt a listából
+3. Kattints a **"Load Model"** gombra
 
-@app.get("/predict/{queue}")
-async def predict(queue):
-    global channel
-    method_frame, header_frame, body = channel.basic_get(queue)
-    data = body.decode("utf-8")
-    channel.basic_ack(method_frame.delivery_tag)
-    data = pd.read_json(data)
+### 3. Predikció
 
-    y = model.predict(data.loc[:, signature])
-    data["y_pred"] = y
-    return data.to_json()
+1. Tölts fel új CSV adatokat
+2. Kattints az **"Adatok Küldése és Predikció"** gombra
+3. Adatok RabbitMQ-n keresztül küldésre kerülnek
+4. Backend feldolgozza → eredmények megjelennek
+5. Metrikák, confusion matrix vizualizáció
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("back_end:app", host="localhost", port=8000, reload=True)
+---
+
+## 🧪 Tesztelés
+
+### API Tesztelés (Backend)
+
+```bash
+# Health check
+curl http://localhost:8000/
+
+# Modellek listázása
+curl http://localhost:8000/models
+
+# Model betöltése
+curl -X POST http://localhost:8000/models/{model_id}/load
+
+# Swagger UI
+# http://localhost:8000/docs
 ```
 
-Ha a kliensoldali kódot kibővítjük, hogy meg tudjuk hívni az url-t, akkor a következőt kapjuk a *commands.py*-ben:
+### RabbitMQ Tesztelés
 
-```python
-import requests
-import pandas as pd
-import pika
+```bash
+# RabbitMQ Management UI
+# http://localhost:15672 (guest/guest)
 
-def post_data(data, queue_name, host = "localhost", port = 5672, user = "guest", password = "guest"):
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host=host, port=port, credentials=pika.PlainCredentials(user, password)))
-    channel = connection.channel()
-    channel.queue_declare(queue=queue_name, durable=True)
-    channel.basic_publish(exchange='', routing_key=queue_name, body=data.encode('utf-8'))
-    connection.close()
-
-if __name__ == "__main__":
-    url = "http://localhost:8000"
-    run_id = "781fd38f7a0b4ef0a7e562b11eacf8e2"
-    resp = requests.get(url + "/model/" + run_id)    
-    print(resp)
-
-    data = pd.read_csv("./data/cars.csv", sep=";")
-    post_data(data.to_json(), "cars")
-    resp = requests.get(url + "/predict/cars" )
-    
-    ## send this to the frontend.
-    
-    print(resp.content)
-
+# Queue-k listázása
+docker-compose exec rabbitmq rabbitmqctl list_queues
 ```
 
-## Frontend: streamlit
+### Docker Health Check
 
-Frontend lényege, hogy egyszerűen tudjuk használni a Szerverünket, miközben minden funkcionalítást megtartunk. A frontend lecseréli majd a commands.py-t, ezen keresztül tudunk majd predikálni, és a visszakapott adatokat vizualizálni. Így nem kell lokálisan használnunk a modellünket, csökkentve az erőforrásigényt (ha a modell ki van szervezve.)
+```bash
+# Service állapotok
+docker-compose ps
 
-Készítsünk egy egyszerű szövegalapú oldalt, amit a [streamlit](https://docs.streamlit.io/) csomag segítségével egyszerűen megoldhatunk. A streamlit widgetekkel operál, melynek elhelyzését a scriptben sorban, instrukciók alapján teszi. Így előbb lesz a gomb az oldalon, ha szövegben a legelső sorban lesz, kivéve ha definiálunk oszlopokat, *etc*.
-
-Az elemek beillesztése a rendszerbe egyszerű, ha importáljuk a streamlitet, akkor:
-
-```python
-import streamlit as st
-if st.button("Click me"):
-    st.write("You clicked me.")
-else:
-    st.write("You DID NOT click me!")
+# Konténer health check
+docker inspect --format='{{.State.Health.Status}}' mlops-backend
 ```
 
-A script-et úgy indítjuk el, hogy:
+---
 
-```
-streamlit run front_end.py
-```
+## 🐛 Troubleshooting
 
+### RabbitMQ nem érhető el
 
-Itt sajnos, ha egyszer megnyomjuk a gombot, akkor úgy is marad. Ha azt akarjuk, hogy visszaállítsa a kiírást:
+```bash
+# RabbitMQ logs
+docker-compose logs rabbitmq
 
-```python
-import streamlit as st
-import time 
-
-#%% Simple interface
-if st.button("Click me"):
-    st.write("You clicked me.")
-else:
-    st.write("You DID NOT click me!")
-
-time.sleep(1)
-st.rerun() # Ez lefuttatja újra a frontendet, így tudunk trükközni.
-
+# Health check
+docker-compose exec rabbitmq rabbitmq-diagnostics ping
 ```
 
-A frontend célja, hogy lecseréljük a terminálon való kezelést, és vizualizáljunk. Ehhez az kell, be tudjuk tölteni a modellt, hogy fel tudjuk tölteni az adatot, ezt el tudjuk küldeni rabbitnak, fogadjuk az eredményt, majd a kapott eredményekre ábrát készítsünk.  
+### Backend nem indul
 
+```bash
+# Backend logs
+docker-compose logs backend
 
-A modellbetöltéshet 2 elem kell: egy gomb és egy input panel:
+# Shell a konténerben
+docker-compose exec backend bash
 
-```python
-## Streamlit
-import streamlit as st
-import pandas as pd
-import pika
-import requests
-
-
-#%% Simple interface
-
-host = "localhost"
-port = 5672
-user = "guest"
-password = "guest"
-url = "http://localhost:8000"
-upload = st.file_uploader("Upload CSV.")
-
-
-run_id = st.text_input("Run ID")
-if st.button("Load model"):
-    resp = requests.get(url + "/model/" + run_id) 
-    st.write(resp.content)
-else:
-    st.write("Click the button to load model.")
+# Dependencies ellenőrzése
+docker-compose exec backend pip list
 ```
 
-Szereljünk bele egy állapotjelzőt, hogy tudjuk van-e modell betöltve. Ehhez hozzányúlunk a *back_end.py*-hez is. Írjunk egy get-et, ahol lekérjük a run_id-t. Itt a betöltésnél lementjük, majd return-nel visszaadjuk. Így néz ki a backend módosítás után:
+### Frontend nem kapcsolódik
 
-```python
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
-import mlflow
-import mlflow.sklearn
-import pandas as pd
-import pika
-import time
-import logging
+```bash
+# Network ellenőrzés
+docker network inspect mlops_ml-network
 
-model = None
-client = None
-signature = None
-rabbit_connection = None
-channel = None
-current_run_id = None
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global client, rabbit_connection, channel
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
-    client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.0.1:5000")
-    credentials = pika.PlainCredentials(username="guest", password="guest")
-    while rabbit_connection is None:
-        try:
-            rabbit_connection = pika.BlockingConnection(pika.ConnectionParameters(host = "localhost", port = 5672, credentials=credentials, heartbeat=0))
-        except pika.exceptions.AMQPConnectionError:
-            logging.error(f"Connection to RabbitMQ failed at localhost:5672. Retrying...")
-            time.sleep(0.3)
-    channel = rabbit_connection.channel()
-    channel.basic_qos(prefetch_count=1)
-                
-    yield
-    channel.close()
-    rabbit_connection.close()
-    return
-
-app = FastAPI(lifespan=lifespan)
-
-@app.get("/") 
-async def read_root():
-    """Default path. See /docs for more."""
-    return "Hello World"
-    ## TODO:
-
-@app.get("/model/current")
-def get_model_state():
-    global current_run_id
-
-    if current_run_id is None:
-        return "No model is loaded"
-    else:
-        return current_run_id 
-
-@app.get("/model/{run_id}")
-def get_mlflow_model(run_id : str):
-    global model, client, signature, current_run_id
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
-    model =  mlflow.sklearn.load_model(f"runs:/{run_id}//model")
-    run_data_dict = client.get_run(run_id).data.to_dictionary()
-    print(run_data_dict)
-    signature = eval(run_data_dict["params"]["input"])
-    current_run_id = run_id
-    return f"Successfully loaded model {run_id}."
-
-@app.get("/predict/{queue}")
-async def predict(queue):
-    global channel
-    method_frame, header_frame, body = channel.basic_get(queue)
-    data = body.decode("utf-8")
-    channel.basic_ack(method_frame.delivery_tag)
-    data = pd.read_json(data)
-    y = model.predict(data.loc[:, signature])
-    data["y_pred"] = y
-    return data.to_json()
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("back_end:app", host="localhost", port=8000, reload=True)
-    
-
-```
-FONTOS: A kivételnek (/model/current) előrébb kell lennie a definícióban mint az általános megfogalmazás!
-
-Állapotjelölő a frontendben úgy jön létre, ha a végére illesztjük:
-```python
-resp = requests.get(url + "/model/current") 
-run_id = resp.content.decode("utf-8")
-st.write(f"Current model: {run_id}")
+# Backend elérhetőség frontend-ből
+docker-compose exec frontend curl http://backend:8000/
 ```
 
+---
 
-Töltsük fel az adatot a streamlithez - ehhez az st.file_uploader widgetet használjuk:
+## 📈 Production Ajánlások
 
+### 1. Environment Variables
 
-```python
-## Streamlit
-import streamlit as st
-import pandas as pd
-import pika
-import requests
-
-
-#%% Simple interface
-
-host = "localhost"
-port = 5672
-user = "guest"
-password = "guest"
-url = "http://localhost:8000"
-upload = st.file_uploader("Upload CSV.")
-
-
-run_id = st.text_input("Run ID")
-if st.button("Load model"):
-    resp = requests.get(url + "/model/" + run_id) 
-    st.write(resp.content)
-else:
-    st.write("Click the button to load model.")
-
-resp = requests.get(url + "/model/current") 
-run_id = resp.content.decode("utf-8")
-st.write(f"Current model: {run_id}")
-
-if upload is not None:
-    data = pd.read_csv(upload, sep=";" )
-    st.table(data)
+```bash
+# .env fájl használata
+RABBITMQ_USER=production_user
+RABBITMQ_PASS=secure_password
+BACKEND_URL=https://api.yourdomain.com
 ```
 
+### 2. Security
 
-Csatlakozzunk a Rabbithoz - ezt csak küldésnél csináljuk meg most! Ha hatékonyabb rendszert szeretnénk, akkor cache-elhetjük a connection-t és a channel-t, hogy ne hozzuk újra őket minden egyes futtatásnál. Ez SOK erőforrást vesz el, ha nem demo jellegű az előadás érdemes implementálni. A cache-ről bővebben [itt](https://docs.streamlit.io/develop/concepts/architecture/caching). 
+- ✅ TLS/SSL használata (HTTPS)
+- ✅ Secrets management (Docker secrets, Vault)
+- ✅ Rate limiting (FastAPI middleware)
+- ✅ Authentication (JWT tokens)
 
-Nem csinálunk mást, mint bemásoljuk a *commands.py*-ből a post_data nevű kódot.
+### 3. Monitoring
 
-```python
-## Streamlit
-import streamlit as st
-import pandas as pd
-import pika
-import requests
+- ✅ Health checks minden service-nél
+- ✅ Logging (ELK stack)
+- ✅ Metrics (Prometheus + Grafana)
+- ✅ Tracing (Jaeger, OpenTelemetry)
 
+### 4. Scaling
 
-#%% Simple interface
-
-host = "localhost"
-port = 5672
-user = "guest"
-password = "guest"
-url = "http://localhost:8000"
-upload = st.file_uploader("Upload CSV.")
-
-run_id = st.text_input("Run ID")
-if st.button("Load model"):
-    resp = requests.get(url + "/model/" + run_id) 
-    st.write(resp.content)
-else:
-    st.write("Click the button to load model.")
-
-resp = requests.get(url + "/model/current") 
-run_id = resp.content.decode("utf-8")
-st.write(f"Current model: {run_id}")
-
-if upload is not None:
-    data = pd.read_csv(upload, sep=";" )
-    st.table(data)
-
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host=host, port=port, credentials=pika.PlainCredentials(user, password)))
-    channel = connection.channel()
-    channel.queue_declare(queue="cars", durable=True)
-    channel.basic_publish(exchange='', routing_key="cars", body=data.to_json().encode('utf-8'))
-    connection.close()
-    resp = requests.get(url + "/predict/cars" )
-
+```yaml
+# docker-compose.yml
+services:
+  backend:
+    deploy:
+      replicas: 3  # Több instance
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
 ```
 
-Majd bővítjük, hogy be tudjuk tölteni a megkapott adatokat egy pandas dataframe-be:
+---
 
-```python
-## Streamlit
-import streamlit as st
-import pandas as pd
-import pika
-import requests
-import json
+## 🤝 Közreműködés
 
-#%% Simple interface
+Ez egy oktatási projekt. Javítások és fejlesztések szívesen fogadottak!
 
-host = "localhost"
-port = 5672
-user = "guest"
-password = "guest"
-url = "http://localhost:8000"
-upload = st.file_uploader("Upload CSV.")
+### Development Workflow
 
+1. Fork a repository
+2. Új branch létrehozása (`git checkout -b feature/amazing-feature`)
+3. Commit változtatások (`git commit -m 'Add amazing feature'`)
+4. Push branch (`git push origin feature/amazing-feature`)
+5. Pull Request nyitása
 
-run_id = st.text_input("Run ID")
-if st.button("Load model") and (run_id is not None or run_id != ""):
-    resp = requests.get(url + "/model/" + run_id) 
-    st.write(resp.content)
-else:
-    st.write("Click the button to load model.")
+---
 
-resp = requests.get(url + "/model/current") 
-run_id = resp.content.decode("utf-8")
-st.write(f"Current model: {run_id}")
+## 📝 Licence
 
-if upload is not None:
-    data = pd.read_csv(upload, sep=";" )
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host=host, port=port, credentials=pika.PlainCredentials(user, password)))
-    channel = connection.channel()
-    channel.queue_declare(queue="cars", durable=True)
-    channel.basic_publish(exchange='', routing_key="cars", body=data.to_json().encode('utf-8'))
-    connection.close()
-    resp = requests.get(url + "/predict/cars" ).json() ## Get a str type dict
-    data = pd.DataFrame.from_dict(json.loads(resp)) # json loads in the str to dict, from which we make a pd.DataFrame
-    st.table(data)
-```
-Írjunk ki metrikákat az st.table után:
+Ez a projekt oktatási célokat szolgál.
 
-```python
-from sklearn.metrics import accuracy_score, precision_score, f1_score, recall_score
-...
+---
 
-    col1, col2, col3, col4 = st.columns(4)
+## 👨‍🏫 Tanulási Célok
 
-    with col1:
-        with st.container(border=True):
-            st.write("Precision")
-            st.write(precision_score(data["Origin"], data["y_pred"],average='micro')) # non binary calculation
+Ezen a projekten keresztül a hallgatók:
 
-    with col2:
-        with st.container(border=True):
-            st.write("Accuracy")
-            st.write(accuracy_score(data["Origin"], data["y_pred"]))
+✅ **SOLID Elvek** - Gyakorlati alkalmazás valós projektben  
+✅ **Microservices** - Service-oriented architektúra  
+✅ **Message Queues** - Aszinkron kommunikáció RabbitMQ-val  
+✅ **REST API** - FastAPI best practices  
+✅ **Docker** - Konténerizáció és orchestration  
+✅ **ML Deployment** - Production-ready ML rendszer  
+✅ **Clean Code** - Karbantartható, bővíthető kód  
 
-    with col3:
-        with st.container(border=True):
-            st.write("F1 Score")
-            st.write(f1_score(data["Origin"], data["y_pred"], average='micro'))
+---
 
-    with col4:  
-        with st.container(border=True):
-            st.write("Recall")
-            st.write(recall_score(data["Origin"], data["y_pred"],average='micro'))
-```
+## 🎉 Következő Lépések
 
+1. ✅ Végezd el az 5 tutorialt sorrendben
+2. ✅ Build-eld le a Docker környezetet
+3. ✅ Próbálj ki saját adatokat
+4. ✅ Bővítsd új feature-ökkel (SOLID elvekkel!)
+5. ✅ Készíts teszteket
+6. ✅ Deploy production környezetbe
 
+---
 
-
-Készítsünk egy heatmapet- és egy ROC curve ábrát. Teljes kód így néz ki:
-
-```python
-## Streamlit
-import streamlit as st
-import pandas as pd
-import pika
-import requests
-import json
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, precision_score, f1_score, recall_score, RocCurveDisplay
-import matplotlib.pyplot as plt
-#%% Simple interface
-
-host = "localhost"
-port = 5672
-user = "guest"
-password = "guest"
-url = "http://localhost:8000"
-upload = st.file_uploader("Upload CSV.")
-
-
-run_id = st.text_input("Run ID")
-if st.button("Load model") and (run_id is not None or run_id != ""):
-    resp = requests.get(url + "/model/" + run_id) 
-    st.write(resp.content)
-else:
-    st.write("Click the button to load model.")
-
-resp = requests.get(url + "/model/current") 
-run_id = resp.content.decode("utf-8")
-st.write(f"Current model: {run_id}")
-
-if upload is not None:
-    data = pd.read_csv(upload, sep=";" )
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host=host, port=port, credentials=pika.PlainCredentials(user, password)))
-    channel = connection.channel()
-    channel.queue_declare(queue="cars", durable=True)
-    channel.basic_publish(exchange='', routing_key="cars", body=data.to_json().encode('utf-8'))
-    connection.close()
-    resp = requests.get(url + "/predict/cars" ).json()
-
-    data = pd.DataFrame.from_dict(json.loads(resp))
-    #st.table(data)
-
-   #%% SCores
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        with st.container(border=True):
-            st.write("Precision")
-            st.write(precision_score(data["Origin"], data["y_pred"],average='micro'))
-
-    with col2:
-        with st.container(border=True):
-            st.write("Accuracy")
-            st.write(accuracy_score(data["Origin"], data["y_pred"]))
-
-    with col3:
-        with st.container(border=True):
-            st.write("F1 Score")
-            st.write(f1_score(data["Origin"], data["y_pred"], average='micro'))
-
-    with col4:  
-        with st.container(border=True):
-            st.write("Recall")
-            st.write(recall_score(data["Origin"], data["y_pred"],average='micro'))
-     #%% figures - heatmap
-    st.pyplot(ConfusionMatrixDisplay.from_predictions(data["Origin"], data["y_pred"]).figure_)
-
-    # AUC
-```
-
-
-### Virtuális környezet exportálása
-```
-pipreqs ./
-```
-
-HA .venv mappa megtalálható, akkor nem fog működni -> Tegyük bele egy külön mappába, és azt adjuk meg elérési útként.
+**Jó tanulást! 🚀**
