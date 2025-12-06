@@ -31,11 +31,17 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
     volumes:
-      - ./backend/models:/app/backend/models  # Model persistence
-      - ./data:/app/data                       # Data access
+      - ./src/backend/models:/app/src/backend/models  # Model persistence
+      - ./data:/app/data                               # Data access
     depends_on:
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - ml-network
     restart: unless-stopped
@@ -55,8 +61,10 @@ services:
     volumes:
       - ./data:/app/data  # Data access
     depends_on:
-      - backend
-      - rabbitmq
+      backend:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     networks:
       - ml-network
     restart: unless-stopped

@@ -15,10 +15,12 @@ COPY requirements-frontend.txt .
 # Install dependencies with UV (much faster than pip)
 RUN uv pip install --system --no-cache -r requirements-frontend.txt
 
-# App kód másolása
-COPY app/ /app/app/
+# App kód másolása (minden a src/ mappában van)
+COPY src/ /app/src/
 COPY frontend/ /app/frontend/
+COPY streaming/ /app/streaming/
 COPY data/ /app/data/
+COPY app.py /app/
 
 # Port expose
 EXPOSE 8501
@@ -28,4 +30,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8501/_stcore/health || exit 1
 
 # Entrypoint
-CMD ["streamlit", "run", "frontend/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]

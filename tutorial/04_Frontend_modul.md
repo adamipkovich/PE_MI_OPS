@@ -86,7 +86,7 @@ class APIClient:
 
 ### Lépés 1: API Client
 
-**Fájl:** `frontend/utils/api_client.py`
+**Fájl:** `app/frontend/utils/api_client.py`
 
 **Miért csináljuk?**
 - Központi API kommunikáció
@@ -189,7 +189,7 @@ class APIClient:
 
 ### Lépés 2: UI Komponensek
 
-**Fájl:** `frontend/components/model_selector.py`
+**Fájl:** `app/frontend/components/model_selector.py`
 
 ```python
 import streamlit as st
@@ -234,7 +234,7 @@ class ModelSelector:
         return model_options[selected] if selected else None
 ```
 
-**Fájl:** `frontend/components/data_uploader.py`
+**Fájl:** `app/frontend/components/data_uploader.py`
 
 ```python
 import streamlit as st
@@ -286,7 +286,7 @@ class DataUploader:
         return None
 ```
 
-**Fájl:** `frontend/components/results_display.py`
+**Fájl:** `app/frontend/components/results_display.py`
 
 ```python
 import streamlit as st

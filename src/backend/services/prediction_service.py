@@ -2,17 +2,7 @@ import logging
 import pandas as pd
 from typing import Dict, Any, Optional
 from .model_storage import ModelStorage
-import sys
-import os
-
-# Add project root to path
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-APP_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "../.."))
-
-if APP_ROOT not in sys.path:
-    sys.path.append(APP_ROOT)
-
-from streaming import Consumer
+from src.streaming import Consumer
 
 logger = logging.getLogger(__name__)
 

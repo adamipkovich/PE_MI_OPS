@@ -3,11 +3,18 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import pandas as pd
-import sys
 import logging
+import sys
+import os
 
-sys.path.append('..')
-from app.streaming import RabbitMQConnection, Consumer
+# Add project root to path
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+APP_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
+
+if APP_ROOT not in sys.path:
+    sys.path.append(APP_ROOT)
+
+from streaming import RabbitMQConnection, Consumer
 from services.model_storage import ModelStorage
 from services.training_service import TrainingService
 from services.prediction_service import PredictionService
@@ -77,6 +84,17 @@ async def list_models():
     models = storage.list_models()
     return {"models": models, "count": len(models)}
 
+@app.get("/models/current")
+async def get_current_model():
+    """Aktuális betöltött model."""
+    if prediction_service is None or prediction_service.current_model_id is None:
+        return {"current_model": None}
+    
+    return {
+        "current_model": prediction_service.current_model_id,
+        "features": prediction_service.current_features
+    }
+
 @app.get("/models/{model_id}")
 async def get_model_info(model_id: str):
     """Model információk lekérése."""
@@ -98,17 +116,6 @@ async def load_model(model_id: str):
     return {
         "message": f"Model betöltve: {model_id}",
         "current_model": model_id
-    }
-
-@app.get("/models/current")
-async def get_current_model():
-    """Aktuális betöltött model."""
-    if prediction_service is None or prediction_service.current_model_id is None:
-        return {"current_model": None}
-    
-    return {
-        "current_model": prediction_service.current_model_id,
-        "features": prediction_service.current_features
     }
 
 @app.post("/train")

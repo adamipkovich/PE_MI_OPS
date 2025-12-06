@@ -51,6 +51,247 @@ GET /predict/{queue}
 
 ---
 
+## 📊 Data Upload & Processing Workflow
+
+### Training Workflow - Teljes Folyamat
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    MODEL TRAINING WORKFLOW                       │
+└─────────────────────────────────────────────────────────────────┘
+
+1. Frontend (Streamlit)
+   │
+   ├── User feltölt egy CSV fájlt (pl. cars.csv)
+   │   └── File uploader: st.file_uploader()
+   │
+   ├── CSV mentése temp file-ba
+   │   └── df.to_csv("temp_training_data.csv")
+   │
+   └── API hívás POST /train
+       │
+       ▼
+2. Backend (FastAPI)
+   │
+   ├── Endpoint: @app.post("/train")
+   │   └── Request body: {data_path, target_column, model_id?}
+   │
+   ├── CSV betöltése
+   │   └── pd.read_csv(data_path, sep=";")
+   │
+   ├── Feature/Target szétválasztás
+   │   ├── y = data[target_column]
+   │   └── X = data.drop(target_column)
+   │
+   ├── TrainingService.train_decision_tree()
+   │   ├── GridSearchCV futtatás
+   │   ├── Best model kiválasztás
+   │   └── Metrikák számítása
+   │
+   └── ModelStorage.save_model()
+       ├── Model → pickle file
+       └── Metadata → metadata.json
+       │
+       ▼
+3. Response
+   │
+   └── JSON vissza a frontend-nek
+       ├── model_id
+       ├── accuracy, precision, f1, recall
+       └── best_params
+```
+
+**Példa Request:**
+```json
+POST http://localhost:8000/train
+Content-Type: application/json
+
+{
+  "data_path": "data/cars.csv",
+  "target_column": "Origin",
+  "model_id": "my_awesome_model"
+}
+```
+
+**Példa Response:**
+```json
+{
+  "model_id": "my_awesome_model",
+  "success": true,
+  "accuracy": 0.8765,
+  "precision": 0.8723,
+  "f1_score": 0.8744,
+  "recall": 0.8765,
+  "best_params": {
+    "criterion": "gini",
+    "ccp_alpha": 0.01,
+    "max_depth": 5
+  },
+  "feature_names": ["MPG", "Cylinders", "Displacement", ...],
+  "n_samples": 398,
+  "n_features": 8
+}
+```
+
+---
+
+### Prediction Workflow - Teljes Folyamat
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   PREDICTION WORKFLOW                            │
+└─────────────────────────────────────────────────────────────────┘
+
+1. Frontend (Streamlit)
+   │
+   ├── User feltölt CSV-t predikáláshoz
+   │   └── File uploader: st.file_uploader()
+   │
+   ├── RabbitMQ Producer létrehozás
+   │   ├── conn = RabbitMQConnection(host="rabbitmq")
+   │   └── producer = Producer(conn)
+   │
+   ├── Adatok küldése queue-ba
+   │   └── producer.send_message("predictions", {"data": df.to_dict()})
+   │
+   └── API hívás GET /predict/{queue_name}
+       │
+       ▼
+2. Backend (FastAPI)
+   │
+   ├── Endpoint: @app.get("/predict/predictions")
+   │
+   ├── Ellenőrzés: Van betöltött model?
+   │   └── if prediction_service.current_model is None → ERROR
+   │
+   ├── PredictionService.predict_from_queue()
+   │   │
+   │   ├── Consumer.get_message("predictions")
+   │   │   └── RabbitMQ queue-ból olvas
+   │   │
+   │   ├── JSON → DataFrame konverzió
+   │   │   └── pd.DataFrame.from_dict(message['data'])
+   │   │
+   │   ├── Feature validáció
+   │   │   └── Megvannak-e a szükséges oszlopok?
+   │   │
+   │   └── Model.predict(X)
+   │       └── Predictions hozzáadása DataFrame-hez
+   │
+   └── Response: {"predictions": [...]}
+       │
+       ▼
+3. Frontend (Streamlit)
+   │
+   ├── Eredmények megjelenítése
+   │   ├── Táblázat: st.dataframe()
+   │   ├── Metrikák: accuracy, precision, f1
+   │   └── Confusion Matrix: matplotlib
+   │
+   └── ✅ Kész!
+```
+
+**Lépésről lépésre példa:**
+
+**1. Model betöltése:**
+```bash
+curl -X POST "http://localhost:8000/models/my_awesome_model/load"
+```
+
+**2. Adatok RabbitMQ-ba küldése (Python):**
+```python
+from app.streaming import RabbitMQConnection, Producer
+import pandas as pd
+
+# Adatok betöltése
+df = pd.read_csv("data/test.csv", sep=";")
+
+# Producer
+conn = RabbitMQConnection(host="rabbitmq", port=5672)
+conn.connect()
+producer = Producer(conn)
+
+# Küldés
+producer.send_message("predictions", {"data": df.to_dict()})
+conn.disconnect()
+```
+
+**3. Predikció kérés:**
+```bash
+curl "http://localhost:8000/predict/predictions"
+```
+
+**Példa Response:**
+```json
+{
+  "predictions": [
+    {
+      "MPG": 18.0,
+      "Cylinders": 8,
+      "Displacement": 307.0,
+      "Horsepower": 130.0,
+      "Weight": 3504,
+      "Acceleration": 12.0,
+      "Year": 70,
+      "prediction": "US"
+    },
+    {
+      "MPG": 15.0,
+      "Cylinders": 8,
+      "Displacement": 350.0,
+      "Horsepower": 165.0,
+      "Weight": 3693,
+      "Acceleration": 11.5,
+      "Year": 70,
+      "prediction": "US"
+    }
+  ]
+}
+```
+
+---
+
+### 🔑 Kulcs Különbségek: Training vs Prediction
+
+| Szempont | Training | Prediction |
+|----------|----------|------------|
+| **Input módszer** | File path (CSV a szerveren) | RabbitMQ queue |
+| **HTTP metódus** | POST | GET |
+| **Adatok tárolása** | Model → pickle file | Nincs tárolás |
+| **Időigény** | Hosszú (GridSearch) | Gyors |
+| **Output** | Metrikák + model_id | Predictions lista |
+| **Side effect** | Model file létrehozás | Nincs |
+
+---
+
+### 🛠️ Gyakorlati Tippek
+
+**1. CSV formátum követelmények:**
+- Elválasztó: `;` (pontosvessző)
+- Encoding: UTF-8
+- Header: Kötelező (első sor)
+- Hiányzó értékek: Kerülendők (NaN kezelés szükséges)
+
+**2. Feature konzisztencia:**
+- Training és prediction során **ugyanazok** a feature-ök szükségesek
+- Feature nevek **pontosan** megegyeznek
+- Feature sorrend: nem számít (DataFrame oszlopnevek alapján)
+
+**3. Error handling:**
+```python
+# Streamlit frontend example
+try:
+    result = api_client.train_model(...)
+    if result and result.get('success'):
+        st.success("✅ Sikeres!")
+    else:
+        st.error(f"❌ Hiba: {result.get('error')}")
+except Exception as e:
+    st.error(f"❌ Váratlan hiba: {e}")
+```
+
+---
+
 ## SOLID Elvek Alkalmazása
 
 ### 1. **Single Responsibility Principle (SRP)**
@@ -88,7 +329,7 @@ class Predictable(ABC):
 
 ### Lépés 1: Model Storage (Mentés/Betöltés)
 
-**Fájl:** `backend/services/model_storage.py`
+**Fájl:** `app/backend/services/model_storage.py`
 
 **Miért csináljuk?**
 - Modellek perzisztens tárolása
@@ -230,7 +471,7 @@ class ModelStorage:
 
 ### Lépés 2: Training Service
 
-**Fájl:** `backend/services/training_service.py`
+**Fájl:** `app/backend/services/training_service.py`
 
 **Miért csináljuk?**
 - Model tanítás üzleti logikája
@@ -357,7 +598,7 @@ class TrainingService:
 
 ### Lépés 3: Prediction Service
 
-**Fájl:** `backend/services/prediction_service.py`
+**Fájl:** `app/backend/services/prediction_service.py`
 
 **Miért csináljuk?**
 - Predikció logika

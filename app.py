@@ -1,20 +1,16 @@
 import streamlit as st
 import pandas as pd
 import sys
-import os
+from pathlib import Path
 
 # Add project root to path
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-APP_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
+import os
 
-if APP_ROOT not in sys.path:
-    sys.path.append(APP_ROOT)
-
-from streaming import RabbitMQConnection, Producer
-from utils.api_client import APIClient
-from components.model_selector import ModelSelector
-from components.data_uploader import DataUploader
-from components.results_display import ResultsDisplay
+from src.streaming import RabbitMQConnection, Producer
+from src.frontend.utils.api_client import APIClient
+from src.frontend.components.model_selector import ModelSelector
+from src.frontend.components.data_uploader import DataUploader
+from src.frontend.components.results_display import ResultsDisplay
 
 # Page config
 st.set_page_config(
